@@ -183,6 +183,119 @@ def copy_file_to_instance(key_path, pub_ip):
         print(f"\nCopying check_webserver.py failed.\n{output}")
 
 
+def create_bucket():
+    while True:
+        bucket_name = input("Choose bucket name, please. (tip: lowercase, do not use underscores)\n").lower()
+        try:
+            response = s3.create_bucket(
+                Bucket=bucket_name,
+                CreateBucketConfiguration={'LocationConstraint': 'eu-west-1'})
+            print(f"\nCreated bucket with name {response.name}.")
+            choice = input("\nWould you like to upload a file to this bucket? (y/n)   ").lower()
+            if choice in ['yes', 'y']:
+                upload_file(bucket_name)
+                break
+            elif choice in ['no', 'n']:
+                break
+            else:
+                print("\nEnter 'y' or 'n', please.")
+            break
+        except Exception as error:
+            print("\n", error, "\n")
+
+
+def upload_file(bucket_name):
+    try:
+        s3.Bucket(bucket_name).upload_file(
+            './photo.jpeg',  # Path to file
+            'photo.jpeg',  # Key name
+            ExtraArgs={'ACL': 'public-read'})  # Make it public readable
+        print(f"Uploaded 'photo.jpeg' to bucket {bucket_name}.\n"
+              f"URL: http://s3-eu-west-1.amazonaws.com/{bucket_name}/photo.jpeg")
+
+        while True:
+            choice = input("\nWould you like to add the image to Apache index page? (y/n):    ").lower()
+            if choice in ['yes', 'y']:
+                public_ip = list_instance_ips()
+                if public_ip:
+                    try:
+                        key_path = import_key_pair()[1]
+                        create_index_page(public_ip,
+                                          key_path,
+                                          f"http://s3-eu-west-1.amazonaws.com/{bucket_name}/photo.jpeg")
+                        break
+                    except Exception as error:
+                        print(error)
+            elif choice in ['no', 'n']:
+                break
+            else:
+                print("\nEnter 'y' or 'n', please.")
+
+    except Exception as error:
+        print("\n", error, "\n")
+
+
+def list_instance_ips():
+    # Empty dictionary to store IPs for instances
+    instance_ips = {}
+    # Start the for loop from 1
+    i = 1
+    print('\n#', '\tInstance ID', '\t\tIP Address')
+    # Iterate through all instances
+    for instance in ec2.instances.all():
+        # Store data for running instances only
+        if instance.state['Name'] == 'running':
+            # Map i as key to instance IP address value
+            instance_ips[str(i)] = instance.public_ip_address
+            print(i, '\t' + instance.id, '\t' + instance.public_ip_address)
+            i += 1
+
+    # No instances are running
+    if len(instance_ips) == 0:
+        print("\nNo running instances. You can create an instance by using option 1 of the main menu.")
+    # If there are running instances, ask the user to choose an option
+    else:
+        while True:
+            try:
+                choice = input("\nEnter instance number: ")
+                # Return the chosen instance IP address
+                return instance_ips[choice]
+            except Exception as error:
+                print(f"\nNot a valid option. Pick a valid number.\n{error}")
+
+
+def create_index_page(public_ip, key_path, url):
+    image_tag = f'<img src="{url}">'
+    echo_index = f"sudo echo '{image_tag}' > index.html"
+    permissions = f"ssh -t -o StrictHostKeyChecking=no -i {key_path} ec2-user@{public_ip} sudo chmod o+w /var/www/html"
+    transfer_index = f'rsync --remove-source-files -az -e "ssh -i {key_path}" index.html ec2-user@{public_ip}:/var/www/html'
+
+    # Append <img> tag to index.html
+    (status, output) = subprocess.getstatusoutput(echo_index)
+    if status == 0:
+        print("\nAppended <img> tag with src = image url from your s3 bucket to index.html")
+    else:
+        print("\n", output, "\n")
+
+    # Give write access to /var/www/html folder
+    (status, output) = subprocess.getstatusoutput(permissions)
+    if status == 0:
+        print("\nChanged the permissions for /var/www/html/")
+    else:
+        print("\n", output, "\n")
+
+    # Transfer index.html
+    (status, output) = subprocess.getstatusoutput(transfer_index)
+    if status == 0:
+        print(f"\nTransferred index.html to EC2 instance ({public_ip}).")
+    else:
+        print("\n", output, "\n")
+
+    # Open localhost in Firefox to view the image
+    print(f"\nOpening localhost {public_ip} in Firefox.")
+    subprocess.call(['firefox', '-new-tab', public_ip])
+
+
 def main():
     while True:
         menu()
@@ -193,7 +306,8 @@ def main():
             security_group = get_security_group()
             instance_name = input("\nEnter name for your instance, please.\n")
             create_instance(key, security_group, instance_name)
-
+        elif menu_choice == "2":
+            create_bucket()
         elif menu_choice == "0":
             print("\nClosing...")
             sys.exit(0)
