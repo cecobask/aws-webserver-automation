@@ -63,15 +63,19 @@ def create_instance(user_key, security_group, instance_name):
 
 def menu():
     print('''
-        + — — — — — — — — — — — — — — — — — — — — — — — — — + 
-        |   Welcome to AWS Web server Automation script!    |
-        |                                                   |
-        |   1. Create an instance                           |
-        |   2. Create a bucket                              |
-        |   3. Upload file to a bucket                      |
-        |                                                   |
-        |   0. Exit                                         |
-        + — — — — — — — — — — — — — — — — — — — — — — — — — +''')
+        + — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — + 
+        |   Welcome to AWS Web server Automation script!                                |
+        |                                                                               |
+        |   1. Create an instance                                                       |
+        |   2. Create bucket (Optional: upload image + append to Apache's index.html)   |
+        |   3. Upload file to a bucket                                                  |
+        |   4. List buckets                                                             | 
+        |   5. List running instances                                                   |
+        |   6. Terminate instances                                                      |
+        |   7. Delete bucket                                                            |
+        |                                                                               |
+        |   0. Exit                                                                     |
+        + — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — +''')
 
 
 def import_key_pair():
@@ -204,25 +208,26 @@ def create_bucket():
             print("\n", error, "\n")
 
 
-def upload_file(bucket_name):
+def upload_file(bucket_name, file_path='./photo.jpeg', key_name='photo.jpeg'):
     try:
         s3.Bucket(bucket_name).upload_file(
-            './photo.jpeg',  # Path to file
-            'photo.jpeg',  # Key name
+            file_path,  # Path to file
+            key_name,  # Key name
             ExtraArgs={'ACL': 'public-read'})  # Make it public readable
-        print(f"Uploaded 'photo.jpeg' to bucket {bucket_name}.\n"
-              f"URL: http://s3-eu-west-1.amazonaws.com/{bucket_name}/photo.jpeg")
+        print(f"\nUploaded '{key_name}' to bucket {bucket_name}.\n"
+              f"URL: http://s3-eu-west-1.amazonaws.com/{bucket_name}/{key_name}")
 
-        while True:
-            choice = input("\nWould you like to add the image to Apache index page? (y/n):    ").lower()
+        # Check if file is image
+        while key_name.lower().endswith(('.jpg', '.jpeg', '.gif', '.bmp', '.png', 'svg')):
+            choice = input("\nWould you like to add the file to Apache index page? (y/n):    ").lower()
             if choice in ['yes', 'y']:
-                public_ip = list_instance_ips()
+                public_ip = select_instance(list_instances())
                 if public_ip:
                     try:
                         key_path = import_key_pair()[1]
                         create_index_page(public_ip,
                                           key_path,
-                                          f"http://s3-eu-west-1.amazonaws.com/{bucket_name}/photo.jpeg")
+                                          f"http://s3-eu-west-1.amazonaws.com/{bucket_name}/{key_name}")
                         break
                     except Exception as error:
                         print(error)
@@ -235,16 +240,22 @@ def upload_file(bucket_name):
         print("\n", error, "\n")
 
 
-def list_instance_ips():
+def list_instances():
     # Empty dictionary to store IPs for instances
     instance_ips = {}
     # Start the for loop from 1
     i = 1
-    print('\n#', '\tInstance ID', '\t\tIP Address')
     # Iterate through all instances
     for instance in ec2.instances.all():
-        # Store data for running instances only
-        if instance.state['Name'] == 'running':
+        # Actions to take when first running instance found
+        if instance.state['Name'] == 'running' and i == 1:
+            # Print header
+            print('\n#', '\tInstance ID', '\t\tIP Address')
+            # Map i as key to instance IP address value
+            instance_ips[str(i)] = instance.public_ip_address
+            print(i, '\t' + instance.id, '\t' + instance.public_ip_address)
+            i += 1
+        elif instance.state['Name'] == 'running':
             # Map i as key to instance IP address value
             instance_ips[str(i)] = instance.public_ip_address
             print(i, '\t' + instance.id, '\t' + instance.public_ip_address)
@@ -253,15 +264,76 @@ def list_instance_ips():
     # No instances are running
     if len(instance_ips) == 0:
         print("\nNo running instances. You can create an instance by using option 1 of the main menu.")
-    # If there are running instances, ask the user to choose an option
     else:
-        while True:
-            try:
-                choice = input("\nEnter instance number: ")
-                # Return the chosen instance IP address
-                return instance_ips[choice]
-            except Exception as error:
-                print(f"\nNot a valid option. Pick a valid number.\n{error}")
+        print(f"\n*\tCtrl + Z to exit.")
+        return instance_ips
+
+
+def select_instance(instance_ips):
+    while True:
+        try:
+            choice = input("\nEnter instance number: ")
+            # Return the chosen instance IP address
+            print(f"You selected instance with IP {instance_ips[choice]}")
+            return instance_ips[choice]
+        except Exception as error:
+            print(f"\nNot a valid option. Pick a valid number.\n{error}")
+
+
+def list_buckets():
+    # Empty dictionary to store bucket names
+    buckets_dict = {}
+    # Start the for loop from 1
+    i = 1
+    print('\n#', '\tBucket name')
+    # Iterate through all buckets
+    for bucket in s3.buckets.all():
+        # Map i as key to bucket name value
+        buckets_dict[str(i)] = bucket.name
+        print(i, '\t' + bucket.name)
+        i += 1
+
+    # No buckets found
+    if len(buckets_dict) == 0:
+        print("\nNo buckets found. You can create a bucket by using option 2 of the main menu.")
+    # If there are s3 buckets, ask the user to choose an option
+    else:
+        print(f"\n*\tCtrl + Z to exit.")
+        return buckets_dict
+
+
+def select_bucket(buckets_dict):
+    while True:
+        try:
+            choice = input("\nEnter bucket number:  ")
+
+            # Return the chosen bucket name
+            print(f"\nYou selected bucket: {buckets_dict[choice]}")
+            return buckets_dict[choice]
+        except Exception as error:
+            print(f"\n{error} is not a valid option.")
+
+
+def delete_bucket():
+    bucket = s3.Bucket(select_bucket(list_buckets()))
+    for key in bucket.objects.all():
+        key.delete()
+    bucket.delete()
+    print(f"\nSuccessfully deleted bucket: {bucket.name}\n")
+
+
+def terminate_instances():
+    terminated_count = 0
+    for instance in ec2.instances.all():
+        if not instance.state['Name'] == 'terminated':
+            instance.terminate()
+            print(f"\nTerminated instance: {instance.id}\n")
+            terminated_count += 1
+
+    if not terminated_count == 0:
+        print(f"\nTerminated instances count: {terminated_count}.\n")
+    else:
+        print("\nNo instances to terminate.")
 
 
 def create_index_page(public_ip, key_path, url):
@@ -291,8 +363,8 @@ def create_index_page(public_ip, key_path, url):
     else:
         print("\n", output, "\n")
 
-    # Open localhost in Firefox to view the image
-    print(f"\nOpening localhost {public_ip} in Firefox.")
+    # Open Apache Web Server localhost in Firefox to view the image
+    print(f"\nOpening Apache Web Server home page ({public_ip}) in Firefox.")
     subprocess.call(['firefox', '-new-tab', public_ip])
 
 
@@ -308,6 +380,25 @@ def main():
             create_instance(key, security_group, instance_name)
         elif menu_choice == "2":
             create_bucket()
+        elif menu_choice == "3":
+            # Let the user choose which bucket to upload file to
+            bucket_name = select_bucket(list_buckets())
+            file_path = os.path.expanduser(input("\nPlease enter absolute path to the file you want to upload:\n"))
+            # If file doesn't exist prompt the user for valid file
+            while not os.path.isfile(file_path):
+                print(f"\nPath: {file_path} does not link to a valid file.")
+                file_path = os.path.expanduser(input("\nPlease enter a valid path to the file you want to upload:\n"))
+            # Extract only the file name from the path and use it as a key
+            key_name = str(file_path.split('/')[-1])
+            upload_file(bucket_name, os.path.expanduser(file_path), key_name)
+        elif menu_choice == "4":
+            list_buckets()
+        elif menu_choice == "5":
+            list_instances()
+        elif menu_choice == "6":
+            terminate_instances()
+        elif menu_choice == "7":
+            delete_bucket()
         elif menu_choice == "0":
             print("\nClosing...")
             sys.exit(0)
