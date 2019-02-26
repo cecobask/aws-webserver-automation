@@ -71,8 +71,10 @@ def menu():
         |   3. Upload file to a bucket                                                  |
         |   4. List buckets                                                             | 
         |   5. List running instances                                                   |
-        |   6. Terminate instances                                                      |
+        |   6. List security groups                                                     |
         |   7. Delete bucket                                                            |
+        |   8. Terminate instances                                                      |
+        |   9. Web server status                                                        |
         |                                                                               |
         |   0. Exit                                                                     |
         + — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — +''')
@@ -115,12 +117,56 @@ def get_security_group():
             return create_security_group(group_name)
 
 
+def list_security_groups():
+    # Empty dictionary to store security group IDs
+    sec_groups_dict = {}
+    response = ec2_client.describe_security_groups()
+    # Start the for loop from 1
+    i = 1
+    # Print header
+    print('\n#', '\tSecurityGroup ID', '\t\tSecurityGroup Name')
+    # Iterate through all security groups
+    for group in response['SecurityGroups']:
+        # Map i as key to security group ID value
+        sec_groups_dict[str(i)] = group['GroupId']
+        if len(group['GroupId']) > 11:
+            print(i, '\t' + group['GroupId'], '\t\t' + group['GroupName'])
+        else:
+            print(i, '\t' + group['GroupId'], '\t\t\t' + group['GroupName'])
+        i += 1
+
+    # No security groups found
+    if len(sec_groups_dict) == 0:
+        print("\nNo security groups found.")
+    else:
+        return sec_groups_dict
+
+
+def select_security_group(sec_groups_dict):
+    while True:
+        choice = input("\nEnter security group number or enter 'new' to create a security group: ")
+        # Return the chosen security group ID
+        try:
+            if int(choice) not in range(len(sec_groups_dict)+1):
+                print(f"\nOption not in range. Pick a valid number.")
+            else:
+                print(f"\nYou selected security group with ID: {sec_groups_dict[choice]}")
+                return sec_groups_dict[choice]
+        except Exception:
+            if choice.lower() == "new":
+                sec_group_name = input("\nEnter name for your security group, please.   ")
+                create_security_group(sec_group_name)
+                break
+            else:
+                print("\nYou have to enter an integer!")
+
+
 def create_security_group(group_name):
     try:
         sec_group = ec2.create_security_group(GroupName=group_name, Description=group_name)
         sec_group.authorize_ingress(IpProtocol="tcp", CidrIp="0.0.0.0/0", FromPort=80, ToPort=80)
         sec_group.authorize_ingress(IpProtocol="tcp", CidrIp="0.0.0.0/0", FromPort=22, ToPort=22)
-        print(f'\nCreated security group {group_name}(id:{sec_group.id}) with ports 80 & 22 open.')
+        print(f'\nCreated security group {group_name} (id:{sec_group.id}) with ports 80 & 22 open.')
         return sec_group.id
     except ClientError as e:
         print(e)
@@ -176,7 +222,7 @@ def copy_file_to_instance(key_path, pub_ip):
 
                 # Command was successful
                 if status == 0:
-                    print(f"\nSuccessfully ran check_webserver.py on the instance.\nOutput: {output}\n")
+                    print(f"\nSuccessfully ran check_webserver.py on the instance.\n\nStatus: {output}\n")
                     break
                 elif countdown == 0:
                     print(f"\nTook to long to run check_webserver.py on the instance.\n{output}\n")
@@ -195,7 +241,7 @@ def create_bucket():
                 Bucket=bucket_name,
                 CreateBucketConfiguration={'LocationConstraint': 'eu-west-1'})
             print(f"\nCreated bucket with name {response.name}.")
-            choice = input("\nWould you like to upload a file to this bucket? (y/n)   ").lower()
+            choice = input("\nWould you like to upload an image to this bucket? (y/n)   ").lower()
             if choice in ['yes', 'y']:
                 upload_file(bucket_name)
                 break
@@ -265,14 +311,13 @@ def list_instances():
     if len(instance_ips) == 0:
         print("\nNo running instances. You can create an instance by using option 1 of the main menu.")
     else:
-        print(f"\n*\tCtrl + Z to exit.")
         return instance_ips
 
 
 def select_instance(instance_ips):
     while True:
+        choice = input("\nEnter instance number: ")
         try:
-            choice = input("\nEnter instance number: ")
             # Return the chosen instance IP address
             print(f"You selected instance with IP {instance_ips[choice]}")
             return instance_ips[choice]
@@ -298,15 +343,13 @@ def list_buckets():
         print("\nNo buckets found. You can create a bucket by using option 2 of the main menu.")
     # If there are s3 buckets, ask the user to choose an option
     else:
-        print(f"\n*\tCtrl + Z to exit.")
         return buckets_dict
 
 
 def select_bucket(buckets_dict):
     while True:
+        choice = input("\nEnter bucket number:  ")
         try:
-            choice = input("\nEnter bucket number:  ")
-
             # Return the chosen bucket name
             print(f"\nYou selected bucket: {buckets_dict[choice]}")
             return buckets_dict[choice]
@@ -351,6 +394,11 @@ def create_index_page(public_ip, key_path, url):
 
     # Give write access to /var/www/html folder
     (status, output) = subprocess.getstatusoutput(permissions)
+
+    # Wait until instance is loaded
+    while not status == 0:
+        (status, output) = subprocess.getstatusoutput(permissions)
+
     if status == 0:
         print("\nChanged the permissions for /var/www/html/")
     else:
@@ -368,6 +416,18 @@ def create_index_page(public_ip, key_path, url):
     subprocess.call(['firefox', '-new-tab', public_ip])
 
 
+def check_web_server(pub_ip, key_path):
+    # Run check_webserver.py
+    (status, output) = subprocess.getstatusoutput("ssh -t -o StrictHostKeyChecking=no -i " + key_path +
+                                                  " ec2-user@" + pub_ip + " ./check_webserver.py")
+
+    # Command was successful
+    if status == 0:
+        print(f"\nSuccessfully ran check_webserver.py on the instance.\n\nStatus: {output}\n")
+    else:
+        print(output)
+
+
 def main():
     while True:
         menu()
@@ -375,7 +435,7 @@ def main():
 
         if menu_choice == "1":
             key = import_key_pair()
-            security_group = get_security_group()
+            security_group = select_security_group(list_security_groups())
             instance_name = input("\nEnter name for your instance, please.\n")
             create_instance(key, security_group, instance_name)
         elif menu_choice == "2":
@@ -396,9 +456,15 @@ def main():
         elif menu_choice == "5":
             list_instances()
         elif menu_choice == "6":
-            terminate_instances()
+            list_security_groups()
         elif menu_choice == "7":
             delete_bucket()
+        elif menu_choice == "8":
+            terminate_instances()
+        elif menu_choice == "9":
+            ip_address = select_instance(list_instances())
+            key_path = import_key_pair()[1]
+            check_web_server(ip_address, key_path)
         elif menu_choice == "0":
             print("\nClosing...")
             sys.exit(0)
