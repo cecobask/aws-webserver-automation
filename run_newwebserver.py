@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 import time
-
+import apache_log_parser
 import boto3
 from botocore.exceptions import ClientError
 
@@ -63,21 +63,22 @@ def create_instance(user_key, security_group, instance_name):
 
 def menu():
     print('''
-        + — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — + 
-        |   Welcome to AWS Web server Automation script!                                |
-        |                                                                               |
-        |   1. Create an instance                                                       |
-        |   2. Create bucket (Optional: upload image + append to Apache's index.html)   |
-        |   3. Upload file to a bucket                                                  |
-        |   4. List buckets                                                             | 
-        |   5. List running instances                                                   |
-        |   6. List security groups                                                     |
-        |   7. Delete bucket                                                            |
-        |   8. Terminate instances                                                      |
-        |   9. Web server status                                                        |
-        |                                                                               |
-        |   0. Exit                                                                     |
-        + — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — +''')
+        + — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — — —  — — — — — + 
+        |   Welcome to AWS Web server Automation script!                                 |
+        |                                                                                |
+        |   1.  Create an instance                                                       |
+        |   2.  Create bucket (Optional: upload image + append to Apache's index.html)   |
+        |   3.  Upload file to a bucket                                                  |
+        |   4.  List buckets                                                             | 
+        |   5.  List running instances                                                   |
+        |   6.  List security groups                                                     |
+        |   7.  Delete bucket                                                            |
+        |   8.  Terminate instances                                                      |
+        |   9.  Web server status                                                        |
+        |   10. Query server access_log (display GET Requests)                           |
+        |                                                                                |
+        |   0. Exit                                                                      |
+        + — — — — — — — — — — — — — — — — — — — — — — — — — — —— — — — — — — — — — — — — +''')
 
 
 def import_key_pair():
@@ -147,7 +148,7 @@ def select_security_group(sec_groups_dict):
         choice = input("\nEnter security group number or enter 'new' to create a security group: ")
         # Return the chosen security group ID
         try:
-            if int(choice) not in range(len(sec_groups_dict)+1):
+            if int(choice) not in range(len(sec_groups_dict) + 1):
                 print(f"\nOption not in range. Pick a valid number.")
             else:
                 print(f"\nYou selected security group with ID: {sec_groups_dict[choice]}")
@@ -233,7 +234,7 @@ def copy_file_to_instance(key_path, pub_ip):
         print(f"\nCopying check_webserver.py failed.\n{output}")
 
 
-def create_bucket():
+def create_bucket(key_path):
     while True:
         bucket_name = input("Choose bucket name, please. (tip: lowercase, do not use underscores)\n").lower()
         try:
@@ -243,7 +244,7 @@ def create_bucket():
             print(f"\nCreated bucket with name {response.name}.")
             choice = input("\nWould you like to upload an image to this bucket? (y/n)   ").lower()
             if choice in ['yes', 'y']:
-                upload_file(bucket_name)
+                upload_file(bucket_name, key_path)
                 break
             elif choice in ['no', 'n']:
                 break
@@ -254,7 +255,7 @@ def create_bucket():
             print("\n", error, "\n")
 
 
-def upload_file(bucket_name, file_path='./photo.jpeg', key_name='photo.jpeg'):
+def upload_file(bucket_name, key_path, file_path='./photo.jpeg', key_name='photo.jpeg'):
     try:
         s3.Bucket(bucket_name).upload_file(
             file_path,  # Path to file
@@ -270,7 +271,6 @@ def upload_file(bucket_name, file_path='./photo.jpeg', key_name='photo.jpeg'):
                 public_ip = select_instance(list_instances())
                 if public_ip:
                     try:
-                        key_path = import_key_pair()[1]
                         create_index_page(public_ip,
                                           key_path,
                                           f"http://s3-eu-west-1.amazonaws.com/{bucket_name}/{key_name}")
@@ -412,8 +412,8 @@ def create_index_page(public_ip, key_path, url):
         print("\n", output, "\n")
 
     # Open Apache Web Server localhost in Firefox to view the image
-    print(f"\nOpening Apache Web Server home page ({public_ip}) in Firefox.")
     subprocess.call(['firefox', '-new-tab', public_ip])
+    print(f"\nOpening Apache Web Server home page ({public_ip}) in Firefox.")
 
 
 def check_web_server(pub_ip, key_path):
@@ -428,29 +428,47 @@ def check_web_server(pub_ip, key_path):
         print(output)
 
 
+# https://github.com/rory/apache-log-parser
+def query_logs(key_path):
+    ip_address = select_instance(list_instances())
+    # Specify logs format for parser
+    line_parser = apache_log_parser.make_parser("%h %l %u %t \"%r\" %>s %b")
+    # Use grep to filter out only the lines with GET Requests
+    ssh = f"ssh -t -o StrictHostKeyChecking=no -i {key_path} ec2-user@{ip_address} -q sudo cat /var/log/httpd/access_log | grep GET"
+    cmd = subprocess.Popen(ssh, shell=True, universal_newlines=True, stdout=subprocess.PIPE)
+    print("\n\t*****  ALL GET REQUESTS FROM APACHE WEB SERVER ACCESS LOG  *****")
+    print("\n\n\tIP Address\t\tTime Received\t\t\tStatus")
+    # Read each line from output and parse it with apache_log_parser
+    for line in cmd.stdout.readlines():
+        log_line_data = line_parser(line)
+        print(f"\t{log_line_data['remote_host']}\t\t{log_line_data['time_received_isoformat']}\t\t{log_line_data['status']}")
+
+
 def main():
+    # Ask the user for path to their key pair
+    key_pair = import_key_pair()
+
     while True:
         menu()
         menu_choice = input("\n        Make a choice, please.     ")
 
         if menu_choice == "1":
-            key = import_key_pair()
             security_group = select_security_group(list_security_groups())
             instance_name = input("\nEnter name for your instance, please.\n")
-            create_instance(key, security_group, instance_name)
+            create_instance(key_pair, security_group, instance_name)
         elif menu_choice == "2":
-            create_bucket()
+            create_bucket(key_pair[1])
         elif menu_choice == "3":
             # Let the user choose which bucket to upload file to
             bucket_name = select_bucket(list_buckets())
-            file_path = os.path.expanduser(input("\nPlease enter absolute path to the file you want to upload:\n"))
+            file_path = os.path.expanduser(input("\nPlease enter the path to the file you want to upload:\n"))
             # If file doesn't exist prompt the user for valid file
             while not os.path.isfile(file_path):
                 print(f"\nPath: {file_path} does not link to a valid file.")
                 file_path = os.path.expanduser(input("\nPlease enter a valid path to the file you want to upload:\n"))
             # Extract only the file name from the path and use it as a key
             key_name = str(file_path.split('/')[-1])
-            upload_file(bucket_name, os.path.expanduser(file_path), key_name)
+            upload_file(bucket_name, key_pair[1], os.path.expanduser(file_path), key_name)
         elif menu_choice == "4":
             list_buckets()
         elif menu_choice == "5":
@@ -463,8 +481,9 @@ def main():
             terminate_instances()
         elif menu_choice == "9":
             ip_address = select_instance(list_instances())
-            key_path = import_key_pair()[1]
-            check_web_server(ip_address, key_path)
+            check_web_server(ip_address, key_pair[1])
+        elif menu_choice == "10":
+            query_logs(key_pair[1])
         elif menu_choice == "0":
             print("\nClosing...")
             sys.exit(0)
