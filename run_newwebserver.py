@@ -236,7 +236,7 @@ def copy_file_to_instance(key_path, pub_ip):
 
 def create_bucket(key_path):
     while True:
-        bucket_name = input("Choose bucket name, please. (tip: lowercase, do not use underscores)\n").lower()
+        bucket_name = input("\nChoose bucket name, please. (tip: lowercase, do not use underscores)\n").lower()
         try:
             response = s3.create_bucket(
                 Bucket=bucket_name,
@@ -268,15 +268,24 @@ def upload_file(bucket_name, key_path, file_path='./photo.jpeg', key_name='photo
         while key_name.lower().endswith(('.jpg', '.jpeg', '.gif', '.bmp', '.png', 'svg')):
             choice = input("\nWould you like to add the file to Apache index page? (y/n):    ").lower()
             if choice in ['yes', 'y']:
-                public_ip = select_instance(list_instances())
-                if public_ip:
-                    try:
-                        create_index_page(public_ip,
-                                          key_path,
-                                          f"http://s3-eu-west-1.amazonaws.com/{bucket_name}/{key_name}")
+                # Dictionary with running instances
+                instance_ips = list_instances()
+                # Empty dictionary means no running instances
+                if not instance_ips:
+                    break
+                else:
+                    # Ask user to select instance
+                    public_ip = select_instance(instance_ips)
+                    if public_ip:
+                        try:
+                            create_index_page(public_ip,
+                                              key_path,
+                                              f"http://s3-eu-west-1.amazonaws.com/{bucket_name}/{key_name}")
+                            break
+                        except Exception as error:
+                            print(error)
+                    else:
                         break
-                    except Exception as error:
-                        print(error)
             elif choice in ['no', 'n']:
                 break
             else:
@@ -380,10 +389,11 @@ def terminate_instances():
 
 
 def create_index_page(public_ip, key_path, url):
-    image_tag = f'<img src="{url}">'
+    image_tag = f'<img src="{url}" alt="{url}">'
     echo_index = f"sudo echo '{image_tag}' > index.html"
     permissions = f"ssh -t -o StrictHostKeyChecking=no -i {key_path} ec2-user@{public_ip} sudo chmod o+w /var/www/html"
-    transfer_index = f'rsync --remove-source-files -az -e "ssh -i {key_path}" index.html ec2-user@{public_ip}:/var/www/html'
+    transfer_index = \
+        f'rsync --remove-source-files -az -e "ssh -i {key_path}" index.html ec2-user@{public_ip}:/var/www/html'
 
     # Append <img> tag to index.html
     (status, output) = subprocess.getstatusoutput(echo_index)
@@ -412,7 +422,7 @@ def create_index_page(public_ip, key_path, url):
         print("\n", output, "\n")
 
     # Open Apache Web Server localhost in Firefox to view the image
-    subprocess.call(['firefox', '-new-tab', public_ip])
+    subprocess.Popen(['firefox', '-new-tab', public_ip])
     print(f"\nOpening Apache Web Server home page ({public_ip}) in Firefox.")
 
 
@@ -434,7 +444,8 @@ def query_logs(key_path):
     # Specify logs format for parser
     line_parser = apache_log_parser.make_parser("%h %l %u %t \"%r\" %>s %b")
     # Use grep to filter out only the lines with GET Requests
-    ssh = f"ssh -t -o StrictHostKeyChecking=no -i {key_path} ec2-user@{ip_address} -q sudo cat /var/log/httpd/access_log | grep GET"
+    ssh = f"ssh -t -o StrictHostKeyChecking=no -i {key_path} " \
+        f"ec2-user@{ip_address} -q sudo cat /var/log/httpd/access_log | grep GET"
     cmd = subprocess.Popen(ssh, shell=True, universal_newlines=True, stdout=subprocess.PIPE)
     print("\n\t*****  ALL GET REQUESTS FROM APACHE WEB SERVER ACCESS LOG  *****")
     print("\n\n\tIP Address\t\tTime Received\t\t\tStatus")
