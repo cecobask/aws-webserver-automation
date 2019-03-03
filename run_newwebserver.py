@@ -3,8 +3,8 @@ import os
 import subprocess
 import sys
 import time
-import apache_log_parser
 import boto3
+import importlib
 from botocore.exceptions import ClientError
 
 ec2_client = boto3.client("ec2")
@@ -212,7 +212,7 @@ def copy_file_to_instance(key_path, pub_ip):
         if status == 0:
             (status, output) = subprocess.getstatusoutput("ssh -t -o StrictHostKeyChecking=no -i " + key_path +
                                                           " ec2-user@" + pub_ip + " ./check_webserver.py")
-            countdown = 6
+            countdown = 9
 
             # Loop until the script is finished being copied onto the instance
             while not status == 0:
@@ -328,7 +328,7 @@ def select_instance(instance_ips):
         choice = input("\nEnter instance number: ")
         try:
             # Return the chosen instance IP address
-            print(f"You selected instance with IP {instance_ips[choice]}")
+            print(f"\nYou selected instance with IP {instance_ips[choice]}")
             return instance_ips[choice]
         except Exception as error:
             print(f"\nNot a valid option. Pick a valid number.\n{error}")
@@ -440,19 +440,64 @@ def check_web_server(pub_ip, key_path):
 
 # https://github.com/rory/apache-log-parser
 def query_logs(key_path):
+    install_pip3()
     ip_address = select_instance(list_instances())
+    # Import library for parsing logs
+    apache_log_parser = install_log_parser("apache_log_parser")
     # Specify logs format for parser
     line_parser = apache_log_parser.make_parser("%h %l %u %t \"%r\" %>s %b")
     # Use grep to filter out only the lines with GET Requests
     ssh = f"ssh -t -o StrictHostKeyChecking=no -i {key_path} " \
         f"ec2-user@{ip_address} -q sudo cat /var/log/httpd/access_log | grep GET"
     cmd = subprocess.Popen(ssh, shell=True, universal_newlines=True, stdout=subprocess.PIPE)
-    print("\n\t*****  ALL GET REQUESTS FROM APACHE WEB SERVER ACCESS LOG  *****")
-    print("\n\n\tIP Address\t\tTime Received\t\t\tStatus")
+    i = 0
     # Read each line from output and parse it with apache_log_parser
     for line in cmd.stdout.readlines():
         log_line_data = line_parser(line)
-        print(f"\t{log_line_data['remote_host']}\t\t{log_line_data['time_received_isoformat']}\t\t{log_line_data['status']}")
+        if i == 0:
+            print("\n\t*****  ALL GET REQUESTS FROM APACHE WEB SERVER ACCESS LOG  *****")
+            print("\n\tIP Address\t\tTime Received\t\t\tStatus")
+            print(f"\t{log_line_data['remote_host']}\t\t{log_line_data['time_received_isoformat']}\t\t{log_line_data['status']}")
+            i += 1
+        else:
+            print(f"\t{log_line_data['remote_host']}\t\t{log_line_data['time_received_isoformat']}\t\t{log_line_data['status']}")
+            i += 1
+
+    if i == 0:
+        print(f"\nNo GET Requests were made to this instance."
+              f"\nOpen {ip_address} in your browser and come back to check the results.")
+
+
+def install_pip3():
+    # Check if pip3 is installed
+    (status, output) = subprocess.getstatusoutput("pip3 --version")
+
+    if "not found" in output:
+        # Install pip3
+        cmd = subprocess.Popen("sudo apt install python3-pip -qq", shell=True)
+        status = cmd.wait()
+        if not status == 0:
+            print("\nProblem installing pip3.")
+        else:
+            print("\nInstalled pip3.")
+
+
+def install_log_parser(package):
+    # Try to import library if it's available
+    try:
+        importlib.import_module(package)
+    # If not found, install library
+    except ImportError:
+        print("\nInstalling apache-log-parser.")
+        cmd = subprocess.Popen("pip3 install apache-log-parser -qq > /dev/null", shell=True)
+        # Wait until install finishes
+        status = cmd.wait()
+        if status == 0:
+            print("\nImported apache-log-parser.")
+        else:
+            print("\nProblem importing apache-log-parser.")
+    finally:
+        return importlib.import_module(package)
 
 
 def main():
