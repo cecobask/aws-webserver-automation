@@ -81,12 +81,16 @@ def menu():
         + — — — — — — — — — — — — — — — — — — — — — — — — — — —— — — — — — — — — — — — — +''')
 
 
+def get_input(text):
+    return input(text)
+
+
 def import_key_pair():
-    key_path = input("\nEnter the path to your key pair. (including the .pem extension)\n")
+    key_path = get_input("\nEnter the path to your key pair. (including the .pem extension)\n")
 
     # If file extension is not .pem or file doesn't exist prompt the user for valid key
     while not key_path[-4:] == ".pem" or not os.path.isfile(os.path.expanduser(key_path)):
-        key_path = input(f"\nEnter valid path to a .pem file, please.\n")
+        key_path = get_input("\nEnter valid path to a .pem file, please.\n")
 
     key_name = key_path.split('/')[-1][:-4]
     print(f"\nSuccess. Path: {os.path.expanduser(key_path)} links to key: {key_name}.")
@@ -98,7 +102,7 @@ def import_key_pair():
 
 # Get security group by name or id
 def get_security_group():
-    group_name = input("\nEnter security group name, please.\n")
+    group_name = get_input("\nEnter security group name, please.\n")
     if group_name.startswith('sg-') and len(group_name) == 20:
         try:
             response = ec2_client.describe_security_groups(GroupIds=[group_name])
@@ -145,7 +149,7 @@ def list_security_groups():
 
 def select_security_group(sec_groups_dict):
     while True:
-        choice = input("\nEnter security group number or enter 'new' to create a security group: ")
+        choice = (get_input("\nEnter security group number or enter 'new' to create a security group: ")).lower()
         # Return the chosen security group ID
         try:
             if int(choice) not in range(len(sec_groups_dict) + 1):
@@ -154,8 +158,8 @@ def select_security_group(sec_groups_dict):
                 print(f"\nYou selected security group with ID: {sec_groups_dict[choice]}")
                 return sec_groups_dict[choice]
         except Exception:
-            if choice.lower() == "new":
-                sec_group_name = input("\nEnter name for your security group, please.   ")
+            if choice == "new":
+                sec_group_name = get_input("\nEnter name for your security group, please.   ")
                 create_security_group(sec_group_name)
                 break
             else:
@@ -235,24 +239,37 @@ def copy_file_to_instance(key_path, pub_ip):
 
 
 def create_bucket(key_path):
+    end = False
     while True:
-        bucket_name = input("\nChoose bucket name, please. (tip: lowercase, do not use underscores)\n").lower()
-        try:
-            response = s3.create_bucket(
-                Bucket=bucket_name,
-                CreateBucketConfiguration={'LocationConstraint': 'eu-west-1'})
-            print(f"\nCreated bucket with name {response.name}.")
-            choice = input("\nWould you like to upload an image to this bucket? (y/n)   ").lower()
-            if choice in ['yes', 'y']:
-                upload_file(bucket_name, key_path)
-                break
-            elif choice in ['no', 'n']:
-                break
-            else:
-                print("\nEnter 'y' or 'n', please.")
+        # A way of breaking from the double while loop
+        if end:
             break
-        except Exception as error:
-            print("\n", error, "\n")
+        else:
+            bucket_name = (get_input("\nChoose bucket name, please. (tip: lowercase, do not use underscores)\n")).lower()
+            try:
+                response = s3.create_bucket(
+                    Bucket=bucket_name,
+                    CreateBucketConfiguration={'LocationConstraint': 'eu-west-1'})
+
+                print(f"\nCreated bucket with name {response.name}.")
+
+                while True:
+                    try:
+                        choice = (get_input("\nWould you like to upload an image to this bucket? (y/n)   ")).lower()
+                        if choice in ['yes', 'y']:
+                            # Boolean to break from second while loop
+                            end = True
+                            upload_file(bucket_name, key_path)
+                            break
+                        elif choice in ['no', 'n']:
+                            end = True
+                            break
+                        else:
+                            print("\nEnter 'y' or 'n', please.")
+                    except Exception as error:
+                        print(error)
+            except Exception as error:
+                print("\n", error, "\n")
 
 
 def upload_file(bucket_name, key_path, file_path='./photo.jpeg', key_name='photo.jpeg'):
@@ -266,7 +283,7 @@ def upload_file(bucket_name, key_path, file_path='./photo.jpeg', key_name='photo
 
         # Check if file is image
         while key_name.lower().endswith(('.jpg', '.jpeg', '.gif', '.bmp', '.png', 'svg')):
-            choice = input("\nWould you like to add the file to Apache index page? (y/n):    ").lower()
+            choice = (get_input("\nWould you like to add the file to Apache index page? (y/n):    ")).lower()
             if choice in ['yes', 'y']:
                 # Dictionary with running instances
                 instance_ips = list_instances()
@@ -292,7 +309,7 @@ def upload_file(bucket_name, key_path, file_path='./photo.jpeg', key_name='photo
                 print("\nEnter 'y' or 'n', please.")
 
     except Exception as error:
-        print("\n", error, "\n")
+        print(f"\n{error}\n")
 
 
 def list_instances():
@@ -325,7 +342,7 @@ def list_instances():
 
 def select_instance(instance_ips):
     while True:
-        choice = input("\nEnter instance number: ")
+        choice = get_input("\nEnter instance number: ")
         try:
             # Return the chosen instance IP address
             print(f"\nYou selected instance with IP {instance_ips[choice]}")
@@ -337,15 +354,26 @@ def select_instance(instance_ips):
 def list_buckets():
     # Empty dictionary to store bucket names
     buckets_dict = {}
+    avoid_list = ['eu-west-1-config-u-3ab0966d-2e0e-49ff-8a5a', 'eu-west-1-log-u-3ab0966d-2e0e-49ff-8a5a',
+                  'eu-west-1-trigger-u-3ab0966d-2e0e-49ff-8a5a']
+
     # Start the for loop from 1
     i = 1
-    print('\n#', '\tBucket name')
+
     # Iterate through all buckets
     for bucket in s3.buckets.all():
-        # Map i as key to bucket name value
-        buckets_dict[str(i)] = bucket.name
-        print(i, '\t' + bucket.name)
-        i += 1
+        if i == 1 and bucket.name not in avoid_list:
+            # Print header
+            print('\n#', '\tBucket name')
+            # Map i as key to bucket name value
+            buckets_dict[str(i)] = bucket.name
+            print(i, '\t' + bucket.name)
+            i += 1
+        elif bucket.name not in avoid_list:
+            # Map i as key to bucket name value
+            buckets_dict[str(i)] = bucket.name
+            print(i, '\t' + bucket.name)
+            i += 1
 
     # No buckets found
     if len(buckets_dict) == 0:
@@ -357,7 +385,7 @@ def list_buckets():
 
 def select_bucket(buckets_dict):
     while True:
-        choice = input("\nEnter bucket number:  ")
+        choice = get_input("\nEnter bucket number:  ")
         try:
             # Return the chosen bucket name
             print(f"\nYou selected bucket: {buckets_dict[choice]}")
@@ -429,7 +457,7 @@ def create_index_page(public_ip, key_path, url):
 def check_web_server(pub_ip, key_path):
     # Run check_webserver.py
     (status, output) = subprocess.getstatusoutput("ssh -t -o StrictHostKeyChecking=no -i " + key_path +
-                                                  " ec2-user@" + pub_ip + " ./check_webserver.py")
+                                                  " ec2-user@" + pub_ip + " -q ./check_webserver.py")
 
     # Command was successful
     if status == 0:
@@ -440,32 +468,35 @@ def check_web_server(pub_ip, key_path):
 
 # https://github.com/rory/apache-log-parser
 def query_logs(key_path):
-    install_pip3()
-    ip_address = select_instance(list_instances())
-    # Import library for parsing logs
-    apache_log_parser = install_log_parser("apache_log_parser")
-    # Specify logs format for parser
-    line_parser = apache_log_parser.make_parser("%h %l %u %t \"%r\" %>s %b")
-    # Use grep to filter out only the lines with GET Requests
-    ssh = f"ssh -t -o StrictHostKeyChecking=no -i {key_path} " \
-        f"ec2-user@{ip_address} -q sudo cat /var/log/httpd/access_log | grep GET"
-    cmd = subprocess.Popen(ssh, shell=True, universal_newlines=True, stdout=subprocess.PIPE)
-    i = 0
-    # Read each line from output and parse it with apache_log_parser
-    for line in cmd.stdout.readlines():
-        log_line_data = line_parser(line)
-        if i == 0:
-            print("\n\t*****  ALL GET REQUESTS FROM APACHE WEB SERVER ACCESS LOG  *****")
-            print("\n\tIP Address\t\tTime Received\t\t\tStatus")
-            print(f"\t{log_line_data['remote_host']}\t\t{log_line_data['time_received_isoformat']}\t\t{log_line_data['status']}")
-            i += 1
-        else:
-            print(f"\t{log_line_data['remote_host']}\t\t{log_line_data['time_received_isoformat']}\t\t{log_line_data['status']}")
-            i += 1
 
-    if i == 0:
-        print(f"\nNo GET Requests were made to this instance."
-              f"\nOpen {ip_address} in your browser and come back to check the results.")
+    instances_dict = list_instances()
+    if instances_dict:
+        install_pip3()
+        # Import library for parsing logs
+        apache_log_parser = install_log_parser("apache_log_parser")
+        ip_address = select_instance(instances_dict)
+        # Specify logs format for parser
+        line_parser = apache_log_parser.make_parser("%h %l %u %t \"%r\" %>s %b")
+        # Use grep to filter out only the lines with GET Requests
+        ssh = f"ssh -t -o StrictHostKeyChecking=no -i {key_path} " \
+            f"ec2-user@{ip_address} -q sudo cat /var/log/httpd/access_log | grep GET"
+        cmd = subprocess.Popen(ssh, shell=True, universal_newlines=True, stdout=subprocess.PIPE)
+        i = 0
+        # Read each line from output and parse it with apache_log_parser
+        for line in cmd.stdout.readlines():
+            log_line_data = line_parser(line)
+            if i == 0:
+                print("\n\t*****  ALL GET REQUESTS FROM APACHE WEB SERVER ACCESS LOG  *****")
+                print("\n\tIP Address\t\tTime Received\t\t\tStatus")
+                print(f"\t{log_line_data['remote_host']}\t\t{log_line_data['time_received_isoformat']}\t\t{log_line_data['status']}")
+                i += 1
+            else:
+                print(f"\t{log_line_data['remote_host']}\t\t{log_line_data['time_received_isoformat']}\t\t{log_line_data['status']}")
+                i += 1
+
+        if i == 0:
+            print(f"\nNo GET Requests were made to this instance."
+                  f"\nOpen {ip_address} in your browser and come back to check the results.")
 
 
 def install_pip3():
@@ -506,11 +537,11 @@ def main():
 
     while True:
         menu()
-        menu_choice = input("\n        Make a choice, please.     ")
+        menu_choice = get_input("\n        Make a choice, please.     ")
 
         if menu_choice == "1":
             security_group = select_security_group(list_security_groups())
-            instance_name = input("\nEnter name for your instance, please.\n")
+            instance_name = get_input("\nEnter name for your instance, please.\n")
             create_instance(key_pair, security_group, instance_name)
         elif menu_choice == "2":
             create_bucket(key_pair[1])
@@ -520,7 +551,6 @@ def main():
             file_path = os.path.expanduser(input("\nPlease enter the path to the file you want to upload:\n"))
             # If file doesn't exist prompt the user for valid file
             while not os.path.isfile(file_path):
-                print(f"\nPath: {file_path} does not link to a valid file.")
                 file_path = os.path.expanduser(input("\nPlease enter a valid path to the file you want to upload:\n"))
             # Extract only the file name from the path and use it as a key
             key_name = str(file_path.split('/')[-1])
@@ -536,8 +566,10 @@ def main():
         elif menu_choice == "8":
             terminate_instances()
         elif menu_choice == "9":
-            ip_address = select_instance(list_instances())
-            check_web_server(ip_address, key_pair[1])
+            instances_dict = list_instances()
+            if instances_dict:
+                ip_address = select_instance(instances_dict)
+                check_web_server(ip_address, key_pair[1])
         elif menu_choice == "10":
             query_logs(key_pair[1])
         elif menu_choice == "0":
