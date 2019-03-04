@@ -85,9 +85,7 @@ def get_input(text):
     return input(text)
 
 
-def import_key_pair():
-    key_path = get_input("\nEnter the path to your key pair. (including the .pem extension)\n")
-
+def import_key_pair(key_path):
     # If file extension is not .pem or file doesn't exist prompt the user for valid key
     while not key_path[-4:] == ".pem" or not os.path.isfile(os.path.expanduser(key_path)):
         key_path = get_input("\nEnter valid path to a .pem file, please.\n")
@@ -395,11 +393,13 @@ def select_bucket(buckets_dict):
 
 
 def delete_bucket():
-    bucket = s3.Bucket(select_bucket(list_buckets()))
-    for key in bucket.objects.all():
-        key.delete()
-    bucket.delete()
-    print(f"\nSuccessfully deleted bucket: {bucket.name}\n")
+    buckets_dict = list_buckets()
+    if buckets_dict:
+        bucket = s3.Bucket(select_bucket(buckets_dict))
+        for key in bucket.objects.all():
+            key.delete()
+        bucket.delete()
+        print(f"\nSuccessfully deleted bucket: {bucket.name}\n")
 
 
 def terminate_instances():
@@ -533,7 +533,7 @@ def install_log_parser(package):
 
 def main():
     # Ask the user for path to their key pair
-    key_pair = import_key_pair()
+    key_pair = import_key_pair(get_input("\nEnter the path to your key pair. (including the .pem extension)\n"))
 
     while True:
         menu()
@@ -547,14 +547,16 @@ def main():
             create_bucket(key_pair[1])
         elif menu_choice == "3":
             # Let the user choose which bucket to upload file to
-            bucket_name = select_bucket(list_buckets())
-            file_path = os.path.expanduser(input("\nPlease enter the path to the file you want to upload:\n"))
-            # If file doesn't exist prompt the user for valid file
-            while not os.path.isfile(file_path):
-                file_path = os.path.expanduser(input("\nPlease enter a valid path to the file you want to upload:\n"))
-            # Extract only the file name from the path and use it as a key
-            key_name = str(file_path.split('/')[-1])
-            upload_file(bucket_name, key_pair[1], os.path.expanduser(file_path), key_name)
+            buckets_dict = list_buckets()
+            if buckets_dict:
+                bucket_name = select_bucket(buckets_dict)
+                file_path = os.path.expanduser(input("\nPlease enter the path to the file you want to upload:\n"))
+                # If file doesn't exist prompt the user for valid file
+                while not os.path.isfile(file_path):
+                    file_path = os.path.expanduser(input("\nPlease enter a valid path to the file you want to upload:\n"))
+                # Extract only the file name from the path and use it as a key
+                key_name = str(file_path.split('/')[-1])
+                upload_file(bucket_name, key_pair[1], os.path.expanduser(file_path), key_name)
         elif menu_choice == "4":
             list_buckets()
         elif menu_choice == "5":
