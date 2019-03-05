@@ -176,27 +176,24 @@ def create_security_group(group_name):
 
 
 def ssh_test(key_path, pub_ip):
-    # Status will always equal 255 on first run
-    (status, output) = subprocess.getstatusoutput("ssh -t -o StrictHostKeyChecking=no -i " + key_path +
-                                                  " ec2-user@" + pub_ip + " sudo ls -a")
-    # Count the time elapsed for while loop
-    timer = 0
-
-    print("\nWaiting for instance to load.")
-
-    # Loop through getting the status of running an SSH command until status 0
-    while status == 255:
-        timer += 1
+    timer = 1
+    # Keep on looping
+    while True:
+        # Test command sent to the instance using ssh
         (status, output) = subprocess.getstatusoutput("ssh -t -o StrictHostKeyChecking=no -i " + key_path +
                                                       " ec2-user@" + pub_ip + " sudo ls -a")
+        print(f"\nSSH test attempt #{timer}")
 
         # SSH command was successful
         if status == 0:
             print("\nThe instance is ready to SSH.")
             break
-        elif timer == 30:
+        elif timer == 10:
             print(f"\nSSH test is taking too long to complete.{output}")
             break
+        else:
+            timer += 1
+            time.sleep(10)
 
 
 def copy_file_to_instance(key_path, pub_ip):
